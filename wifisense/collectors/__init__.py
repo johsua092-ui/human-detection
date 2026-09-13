@@ -13,13 +13,14 @@ from typing import Any, Optional
 from .base import Collector, CollectorError, Sample
 from .csi import CSICollector
 from .platform_rssi import AirportRSSICollector, NetshRSSICollector, TermuxRSSICollector
+from .router import RouterRSSICollector
 from .rssi_iw import IwRSSICollector
 from .rssi_proc import ProcRSSICollector
 from .rssi_radiotap import RadiotapRSSICollector
 from .synthetic import ReplayCollector, SyntheticRSSICollector
 
 SUPPORTED_SOURCES = (
-    "auto", "radiotap", "iw", "proc", "netsh", "airport", "termux",
+    "auto", "radiotap", "iw", "proc", "netsh", "airport", "termux", "router",
     "csi", "csi_pcap", "synthetic", "replay",
 )
 
@@ -27,6 +28,7 @@ __all__ = [
     "Collector", "CollectorError", "Sample",
     "RadiotapRSSICollector", "IwRSSICollector", "ProcRSSICollector",
     "NetshRSSICollector", "AirportRSSICollector", "TermuxRSSICollector",
+    "RouterRSSICollector",
     "CSICollector", "SyntheticRSSICollector", "ReplayCollector",
     "build_collector", "SUPPORTED_SOURCES",
 ]
@@ -70,6 +72,9 @@ def build_collector(config: Any = None, source: str = "auto",
 
     if source == "termux":
         return TermuxRSSICollector(config, interface=interface)
+
+    if source == "router":
+        return RouterRSSICollector(config, interface=interface)
 
     if source == "auto":
         raise CollectorError(

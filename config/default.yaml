@@ -113,6 +113,18 @@ console:
   refresh_hz: 2.0
   show_features: true    # extra feature lines under the main block
 
+# --- router-as-sensor (IndiHome ZTE etc., telnet/ssh root) ----------------
+router:
+  host: null            # e.g. 192.168.1.1 — set this to use --source router
+  user: null            # often "root" after the factory-mode unlock
+  password: null
+  protocol: telnet      # telnet | ssh
+  port: 23              # 23 for telnet, 22 for ssh
+  iface: null           # null = try wlan0 (ZTE F670L uses wlan0 for 2.4G, wlan1 for 5G)
+  command: ""           # empty = "iw dev {iface} station dump"
+  interval_s: 1.0
+  grace_s: 20.0         # error after this long with no connected clients
+
 # --- resilience ----------------------------------------------------------
 watchdog:
   stall_s: 45.0          # no samples for this long -> restart the backend
