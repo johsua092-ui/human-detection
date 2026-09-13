@@ -9,7 +9,6 @@ from .localize import (
     LocalizationResult, Zone, ZoneLocalizer, default_zones, load_localizer,
     room_geometry, zone_model_path, zones_from_config,
 )
-
 __all__ = [
     "baseline", "engine", "localize", "ml",
     "Baseline", "FeatureStats", "DriftAdapter",

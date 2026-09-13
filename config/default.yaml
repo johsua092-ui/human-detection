@@ -125,6 +125,26 @@ router:
   interval_s: 1.0
   grace_s: 20.0         # error after this long with no connected clients
 
+# --- 3D room / zone localization ------------------------------------------
+room:
+  width_m: 5.0          # room box used by the 3D view (edit to match your room)
+  depth_m: 4.0
+  height_m: 2.7
+  ap_position: null     # [x, y, z] of the router; null = near the far corner
+  sensor_position: null # [x, y, z] of the sensing device; null = near the origin
+
+zones:                  # declared zones for "which part of the room"
+  - { name: near_ap,  x: 4.2, y: 3.4, z: 0.0, radius: 0.9, label: "dekat router" }
+  - { name: far_ap,   x: 0.8, y: 0.6, z: 0.0, radius: 0.9, label: "jauh router" }
+  - { name: kiri,     x: 1.4, y: 3.2, z: 0.0, radius: 0.9, label: "sisi kiri" }
+  - { name: kanan,    x: 3.6, y: 0.8, z: 0.0, radius: 0.9, label: "sisi kanan" }
+
+localization:
+  dir: models
+  min_confidence: 35    # below this the 3D view shows "unknown"
+  duration_per_zone: 10.0   # seconds to stand still in each zone during --calibrate-zones
+  settle_s: 2.0             # ignored at zone start (radio settling)
+
 # --- resilience ----------------------------------------------------------
 watchdog:
   stall_s: 45.0          # no samples for this long -> restart the backend

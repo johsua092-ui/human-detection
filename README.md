@@ -149,6 +149,136 @@ Synapse, token bot Telegram otomatis ketarik dari `~/.synapse/.env`.
 
 ---
 
+## Auto-discovery — "akalin biar WiFi-nya kedetect sendiri"
+
+Langkah pertama di mesin baru: suruh sistem nyari sendiri semua jalan masuk.
+
+```bash
+python main.py --discover            # scan NIC lokal + gateway + CSI + Termux
+python main.py --discover --auto-setup   # tulis pemenangnya ke config/local.yaml
+```
+
+Yang diperiksa (berurut prioritas):
+
+1. NIC lokal + monitor mode + tshark (paling kaya, butuh sudo)
+2. NIC lokal link RSSI (`iw` / `/proc/net/wireless`), tanpa root
+3. **Router rumah sebagai sensor** — probe gateway LAN sendiri (telnet/ssh) +
+   credential default ZTE/IndiHome yang memang terdokumentasi
+4. Android/Termux (HP jadi sensor)
+5. Toolchain CSI (nexmon / Intel 5300 / ath9k / pcap offline)
+
+Output-nya tabel bernilai: mana yang usable, kenapa, dan command persisnya.
+`--auto-setup` nulis `config/local.yaml` (default.yaml gak pernah disentuh) — run
+berikutnya tinggal `python main.py`.
+
+```bash
+python main.py --discover --probe-host 192.168.1.1   # router spesifik
+python main.py --discover --no-cred-probe            # cuma cek port, gak coba login
+```
+
+---
+
+## Router jadi sensor (opsi gratis, tanpa laptop)
+
+Router itu AP yang nyala 24/7 di tengah rumah. Kalau bisa dapat shell-nya, tiap
+**perangkat keluarga yang connect jadi sensor RSSI sendiri-sendiri** — jauh lebih
+kaya daripada satu HP.
+
+**Router IndiHome (ZTE F670L / F609 / F660 / F680, Fiberhome HG6245D):**
+
+1. Login web admin: `192.168.1.1`, coba `admin/admin`, `user/user`, atau
+   superadmin `telecomadmin/admintelecom`
+2. Butuh shell? Ada jalur unlock factory-mode buat ZTE F670L (HW v9+) yang buka
+   root telnet di port 23
+3. Konfigurasi:
+
+```yaml
+router:
+  host: 192.168.1.1
+  user: root
+  password: ****
+  protocol: telnet     # atau ssh
+  iface: wlan0         # F670L: wlan0 = 2.4GHz, wlan1 = 5GHz
+```
+
+```bash
+python main.py --discover --probe-host 192.168.1.1   # cek dulu bisa masuk apa nggak
+python main.py --source router --calibrate --duration 45
+python main.py --source router
+```
+
+Cara manual lihat angkanya di web router: menu **Management → Device Info →
+Wireless → Associated Client List** → kolom **RSSI**. Backend ini cuma baca
+angka yang sama, otomatis, tiap detik.
+
+Batas jujur: ZTE F670L chipsetnya **tidak** mendukung CSI, jadi dapat RSSI
+multi-client (presence + motion + lokalisasi zona), bukan breathing/heartbeat.
+
+**Router OpenWrt / GL.iNet** → bisa jalan lebih bagus lagi: script ini jalan
+langsung di router (Python 3 lewat `opkg install python3-light python3-numpy`),
+pakai `iw station dump`, dan dapat `monitor mode` juga kalau driver-nya support.
+
+---
+
+## 3D room view + lokalisasi zona
+
+Dashboard punya **room view**: kotak ruangan 3D (drag buat rotate, scroll/pinch
+zoom) atau 2D tampak atas, lengkap dengan posisi AP, sensor, zona terdeklarasi,
+dan blob merah = perkiraan posisi manusia.
+
+Supaya bisa nunjukkin **posisi** (bukan cuma "ada orang"), sistem perlu belajar
+"sidik jari" sinyal tiap zona dulu:
+
+```bash
+# 1. kalibrasi ruangan kosong (baseline)
+python main.py --calibrate --duration 45
+
+# 2. kalibrasi zona: BERDIRI DIAM di tiap zona, sistem ngambil sidik jarinya
+python main.py --calibrate-zones --zone-duration 10
+```
+
+Zona didefinisikan di config (meter, relatif ke kotak ruangan):
+
+```yaml
+room:
+  width_m: 5.0
+  depth_m: 4.0
+  height_m: 2.7
+  ap_position: [4.7, 3.7, 2.1]      # null = pakai default
+  sensor_position: [0.3, 0.3, 1.0]
+zones:
+  - { name: near_ap, x: 4.2, y: 3.4, radius: 0.9, label: "dekat router" }
+  - { name: far_ap,  x: 0.8, y: 0.6, radius: 0.9, label: "jauh router" }
+  - { name: kiri,    x: 1.4, y: 3.2, radius: 0.9, label: "sisi kiri" }
+  - { name: kanan,   x: 3.6, y: 0.8, radius: 0.9, label: "sisi kanan" }
+```
+
+Hasilnya muncul di terminal (`Zone: near_ap 78% pos=(4.2, 3.4)`) dan di dashboard
+(blob merah + label persen). Kalau tidak yakin, dia bilang **"unknown"** — bukan
+menebak.
+
+**Batas jujurnya, biar gak jadi janji palsu:** ini lokalisasi **tingkat zona**,
+bukan sentimeter. Akurasi naik seiring jumlah link: satu HP↔router = kasar
+(dekat/jauh dari garis link), beberapa client sekaligus = bagus (kuadran),
+CSI = potensi paling halus tapi butuh hardware khusus. Tidak ada kamera, tidak
+ada wajah, tidak ada GPS.
+
+---
+
+## Saran sumber sinyal (semua gratis, tanpa ESP32)
+
+| # | Cara | Butuh | Kualitas |
+|---|---|---|---|
+| 1 | **Router rumah** (telnet/ssh) | akses shell router | bagus (multi-client RSSI) |
+| 2 | **HP Android + Termux** | HP nganggur + Termux:API | cukup (1 link, ~1 Hz) |
+| 3 | **Router OpenWrt/GL.iNet** | router custom | terbaik tanpa beli NIC |
+| 4 | **PC/laptop desktop** yang nyala | harus ada WiFi NIC | terbaik (monitor mode) |
+| 5 | **USB WiFi adapter** (~50rb) | beli adapter murah | terbaik + bisa CSI kalau chipset cocok |
+| 6 | **HP rooted (Broadcom)** | root + nexmon_csi | CSI sungguhan |
+| 7 | NAS / Raspberry Pi / mini PC | perangkat yang nyala 24/7 | terbaik |
+
+Semua di atas tetap **tanpa ESP32/ESP8266/Arduino**.
+
 ## Command lengkap
 
 ```bash
@@ -159,6 +289,10 @@ python main.py --calibrate         # kalibrasi baseline, lalu lanjut sensing
 python main.py --calibrate-only    # kalibrasi lalu exit
 python main.py --dashboard         # dashboard eksplisit (default-nya sudah nyala)
 python main.py --capabilities      # laporan hardware + mode yang dipakai
+python main.py --discover          # cari otomatis semua jalan masuk (NIC/router/CSI/Termux)
+python main.py --discover --auto-setup   # + tulis config/local.yaml
+python main.py --calibrate-zones --zone-duration 10   # sidik jari tiap zona (untuk 3D)
+python main.py --source router --router-host 192.168.1.1 --router-protocol telnet
 python main.py --list-sources
 python main.py --source iw --interface wlan0
 python main.py --source radiotap --interface wlan0   # butuh sudo

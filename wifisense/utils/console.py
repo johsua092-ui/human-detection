@@ -87,15 +87,16 @@ class ConsoleRenderer:
     # ------------------------------------------------------------------ #
     def render(self, det: Optional[DetectionState], features: Optional[Dict[str, float]],
                rssi: Optional[float], stats: Optional[Dict[str, Any]] = None,
-               alarm: Optional[Dict[str, Any]] = None, force: bool = False) -> None:
+               alarm: Optional[Dict[str, Any]] = None, force: bool = False,
+               zone: Optional[Dict[str, Any]] = None) -> None:
         now = time.time()
         if not force and (now - self._last_print) < self.interval:
             return
         self._last_print = now
-        lines = self._compose(det, features, rssi, stats or {}, alarm or {})
+        lines = self._compose(det, features, rssi, stats or {}, alarm or {}, zone)
         self._write_block(lines)
 
-    def _compose(self, det, features, rssi, stats, alarm) -> List[str]:
+    def _compose(self, det, features, rssi, stats, alarm, zone=None) -> List[str]:
         p = self.palette
         head = self.header_info
         stamp = time.strftime("%H:%M:%S")
@@ -157,6 +158,15 @@ class ConsoleRenderer:
             if alarm.get("last_trigger"):
                 extra += f"  last={time.strftime('%H:%M:%S', time.localtime(alarm['last_trigger']))}"
             lines.append(f"Alarm: {armed_txt}   {p.dim(extra)}")
+
+        if zone:
+            if zone.get("zone"):
+                lines.append(f"Zone: {p.cyan(str(zone['zone']))}"
+                             + p.dim(f"  {zone.get('confidence', 0):.0f}%"
+                                     f"  pos=({zone.get('position', [0, 0, 0])[0]:.1f},"
+                                     f" {zone.get('position', [0, 0, 0])[1]:.1f})"))
+            else:
+                lines.append(p.dim(f"Zone: unknown — {zone.get('reason', '')}"))
 
         if stats:
             samples = stats.get("samples", 0)

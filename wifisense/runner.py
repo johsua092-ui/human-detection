@@ -41,6 +41,9 @@ from .collectors import capabilities as caps
 from .config import Config
 from .detection.baseline import baseline_path, compute_baseline
 from .detection.engine import DetectionEngine, DetectionState
+from .detection.localize import (
+    Zone, load_localizer, room_geometry, zone_model_path, zones_from_config, ZoneLocalizer,
+)
 from .processing.filters import StreamingFilter
 from .processing.features import CSIFeatureExtractor, RSSIFeatureExtractor
 from .utils.console import ConsoleRenderer
@@ -56,8 +59,10 @@ class SensingRunner:
                  dashboard: Optional[bool] = None, log: Optional[bool] = None,
                  console: bool = True, retry_forever: bool = True,
                  calibrate: bool = False, calibrate_only: bool = False,
+                 calibrate_zones: bool = False, zone_duration: Optional[float] = None,
+                 zone_names: Optional[List[str]] = None,
                  arm: Optional[str] = None, duration: Optional[float] = None,
-                 points: int = 900):
+                 points: int = 900, quiet: bool = False):
         self.config = config
         self.requested_source = source
         self.requested_mode = mode
@@ -70,6 +75,10 @@ class SensingRunner:
         self.retry_forever = retry_forever
         self.calibrate_on_start = calibrate
         self.calibrate_only = calibrate_only
+        self.calibrate_zones_on_start = calibrate_zones
+        self.zone_duration = zone_duration
+        self.zone_names = list(zone_names or [])
+        self.quiet = quiet
         self.arm_on_start = arm
         self.duration = duration
         self.console_enabled = console
@@ -98,6 +107,8 @@ class SensingRunner:
         self._calibration: Optional[Dict[str, Any]] = None
         self._calib_windows: List[Dict[str, float]] = []
         self._calib_started: Optional[float] = None
+        self._localizer: Any = None
+        self._localization: Optional[Dict[str, Any]] = None
         self._stall_s = float(config.get_path("watchdog.stall_s", 45.0))
         self._restarts = 0
         self._decision: Dict[str, Any] = {}
@@ -120,9 +131,7 @@ class SensingRunner:
         source = decision.get("source") or self.requested_source
         self.config.set_path("mode", decision.get("mode"))
 
-        if not self.console_enabled:
-            pass
-        else:
+        if self.console_enabled and not self.quiet:
             print(caps.format_report(self._report,
                                      color=self.config.get_path("console.color", True)))
             print()
@@ -164,10 +173,12 @@ class SensingRunner:
             self.config, baseline=baseline, method=self.method, model=model,
             adaptive_drift=float(self.config.get_path("calibration.adaptive_drift", 0.02)),
         )
-        if baseline and self.console_enabled:
+        if baseline and self.console_enabled and not self.quiet:
             print("[WiFi Sense] loaded calibration:")
             print("  " + baseline.describe().replace("\n", "\n  "))
             print()
+
+        self._load_localizer()
 
         # ---- logging -------------------------------------------------- #
         self._logger = DataLogger(
@@ -227,6 +238,98 @@ class SensingRunner:
         self._watchdog = threading.Thread(target=self._watchdog_loop, name="wifisense-watchdog",
                                           daemon=True)
         self._watchdog.start()
+
+    # ------------------------------------------------------------------ #
+    def _load_localizer(self) -> None:
+        """Load a trained zone model if present, and always publish the room
+        geometry + declared zones so the 3D dashboard can render them."""
+        interface = self.interface or "default"
+        self._localizer = load_localizer(self.config, interface)
+        geometry = room_geometry(self.config)
+        zones = zones_from_config(self.config)
+        self.hub.publish_meta(room=geometry, zones=[z.__dict__ for z in zones])
+        if self._localizer is not None:
+            self.hub.publish_meta(localization_notes=self._localizer.host_notes,
+                                  localization_zones=sorted(self._localizer.signatures))
+            if self.console_enabled and not self.quiet:
+                print("[WiFi Sense] loaded zone localization:")
+                print("  " + self._localizer.describe().replace("\n", "\n  "))
+                print()
+
+    # ------------------------------------------------------------------ #
+    def _run_zone_calibration(self) -> None:
+        """Walk through every declared zone so the localizer learns its signature.
+
+        For each zone the operator stands still in that part of the room for a
+        few seconds; the feature windows collected become that zone's template.
+        Requires a working collector (--source ...)."""
+        zones = zones_from_config(self.config)
+        if self.zone_names:
+            zones = [z for z in zones if z.name in self.zone_names]
+        if not zones:
+            print("[WiFi Sense] zone calibration: no zones declared in config")
+            return
+        if not self._collector:
+            print("[WiFi Sense] zone calibration: collector not ready")
+            return
+
+        duration = self.zone_duration or float(
+            self.config.get_path("localization.duration_per_zone", 10.0))
+        print(f"\n[WiFi Sense] ZONE CALIBRATION: stand still in each zone for {duration:.0f}s.\n")
+
+        zone_rows: Dict[str, List[Dict[str, float]]] = {}
+        for zone in zones:
+            label = zone.label or zone.name
+            print(f"  >>> Move to zone '{zone.name}' ({label}) and STAND STILL — {duration:.0f}s")
+            windows = self._collect_zone_windows(duration)
+            if len(windows) < 3:
+                print(f"      (zone {zone.name}: only {len(windows)} windows — weak signature)")
+            zone_rows[zone.name] = windows
+            print(f"      collected {len(windows)} windows for '{zone.name}'")
+
+        localizer = ZoneLocalizer(
+            zones, min_confidence=float(self.config.get_path("localization.min_confidence", 35)))
+        localizer.fit(zone_rows, empty_rows=self._calib_windows or None)
+        path = zone_model_path(self.config, self.interface)
+        localizer.save(path)
+        self._localizer = localizer
+        self.hub.publish_meta(localization_notes=localizer.host_notes,
+                              localization_zones=sorted(localizer.signatures))
+        print(f"\n[WiFi Sense] zone localization saved: {path}")
+        print("  " + localizer.describe().replace("\n", "\n  "))
+        for note in localizer.host_notes:
+            print(f"  note: {note}")
+        print()
+
+    def _collect_zone_windows(self, seconds: float) -> List[Dict[str, float]]:
+        """Collect feature windows from the live collector for ``seconds``."""
+        extractor = RSSIFeatureExtractor(
+            window_s=float(self.config.get_path("sampling.window_s", 12.0)),
+            fs=float(self.config.get_path("sampling.resample_hz", 20.0)),
+            min_samples=int(self.config.get_path("sampling.min_samples", 24)),
+            spectral=bool(self.config.get_path("features.spectral", True)),
+        )
+        filter_ = StreamingFilter(
+            outlier_sigma=float(self.config.get_path("processing.outlier_gate_sigma", 4.0)),
+            median_window=int(self.config.get_path("processing.median_window", 5)),
+        )
+        windows: List[Dict[str, float]] = []
+        deadline = time.time() + float(seconds)
+        last_analysis = 0.0
+        for sample in self._collector.stream():
+            if self.stop_event.is_set():
+                break
+            if sample.rssi is not None:
+                result = filter_.update(sample.rssi)
+                extractor.push(sample.t, result["filtered"])
+            if extractor.ready() and (time.time() - last_analysis) >= self._analysis_interval:
+                feats = extractor.features()
+                if feats:
+                    windows.append(feats)
+                    last_analysis = time.time()
+            if time.time() >= deadline:
+                break
+        return windows
 
     # ------------------------------------------------------------------ #
     def _announce_dashboard(self, host: str, port: int) -> None:
@@ -349,6 +452,11 @@ class SensingRunner:
         install_signals(self)
         if self.calibrate_on_start:
             self.start_calibration(recalibrate=False)
+        if self.calibrate_zones_on_start:
+            self._run_zone_calibration()
+        if self.calibrate_only:
+            self.shutdown()
+            return 0
 
         backoff = 2.0
         try:
@@ -421,10 +529,19 @@ class SensingRunner:
             return
 
         state: DetectionState = self._engine.update(features)
+        localization = None
+        if self._localizer is not None and state.presence:
+            localization = self._localizer.predict(features).to_dict()
+        self._localization = localization
         baseline_median = None
         if self._engine.baseline and "mean" in self._engine.baseline.features:
             baseline_median = self._engine.baseline.features["mean"].median
-        self.hub.publish_state(state, features, extra={"baseline_median": baseline_median})
+        self.hub.publish_state(state, features, extra={
+            "baseline_median": baseline_median,
+            "localization": localization,
+            "room": self.hub.meta.get("room"),
+            "zones": self.hub.meta.get("zones"),
+        })
         if self._logger:
             self._logger.log_window(features, state)
         self._publish_meta(warming_up=False)
@@ -470,7 +587,8 @@ class SensingRunner:
             stats["calibration"] = (f"{self._calibration['progress']*100:.0f}% "
                                     f"({len(self._calib_windows)} windows, room must stay empty)")
         self._renderer.render(det, features, last_rssi, stats=stats,
-                              alarm=self._alarm.status() if self._alarm else None)
+                              alarm=self._alarm.status() if self._alarm else None,
+                              zone=latest.get("localization"))
 
     # ------------------------------------------------------------------ #
     def _handle_collector_error(self, exc: CollectorError, backoff: float) -> bool:

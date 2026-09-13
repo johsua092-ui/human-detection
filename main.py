@@ -51,12 +51,35 @@ def build_parser() -> argparse.ArgumentParser:
                       help="offline CSI capture file (.pcap / Intel 5300 .dat) — needs csiread")
     mode.add_argument("--csi-tool", choices=("nexmon", "iwl5300", "atheros", "pcap", "file"),
                       default="nexmon", help="CSI toolchain for --csi-pcap")
+    mode.add_argument("--router-host", default=None,
+                      help="router IP for --source router (overrides config)")
+    mode.add_argument("--router-user", default=None, help="router shell user")
+    mode.add_argument("--router-pass", default=None, help="router shell password")
+    mode.add_argument("--router-protocol", choices=("telnet", "ssh"), default=None,
+                      help="how to reach the router shell")
+    mode.add_argument("--router-iface", default=None,
+                      help="router wireless interface to poll (wlan0 / wlan1 / ath0 ...)")
 
     actions = parser.add_argument_group("actions")
     actions.add_argument("--calibrate", action="store_true",
                          help="capture the empty-room baseline, then keep sensing")
     actions.add_argument("--calibrate-only", action="store_true",
                          help="capture the baseline and exit")
+    actions.add_argument("--discover", action="store_true",
+                         help="scan this machine (NICs, tools, CSI) AND the LAN gateway "
+                              "(router shell) and report the best way to sense")
+    actions.add_argument("--auto-setup", action="store_true",
+                         help="with --discover: write the winner to config/local.yaml")
+    actions.add_argument("--probe-host", default=None,
+                         help="router to probe during --discover (default: the gateway)")
+    actions.add_argument("--no-cred-probe", action="store_true",
+                         help="--discover: do not try documented default router logins")
+    actions.add_argument("--calibrate-zones", action="store_true",
+                         help="walk through each declared zone so the 3D view can place people")
+    actions.add_argument("--zone", action="append", default=[], dest="zone_names",
+                         help="limit --calibrate-zones to this zone (repeatable)")
+    actions.add_argument("--zone-duration", type=float, default=None,
+                         help="seconds to stand still per zone (default 10)")
     actions.add_argument("--capabilities", action="store_true",
                          help="print the hardware capability report and exit")
     actions.add_argument("--list-sources", action="store_true",
@@ -134,6 +157,24 @@ def cmd_capabilities(args: argparse.Namespace, cfg) -> int:
     return 0
 
 
+def cmd_discover(args: argparse.Namespace) -> int:
+    from wifisense import discovery
+
+    result = discovery.discover(host=args.probe_host,
+                                try_credentials=not args.no_cred_probe)
+    print(discovery.format_discovery(result, color=not args.no_color))
+    if args.auto_setup:
+        path = discovery.auto_setup(cfg_for_discover(args), result)
+        print(f"\n[WiFi Sense] auto-setup written: {path}")
+        print("  re-run:  python main.py")
+    return 0
+
+
+def cfg_for_discover(args: argparse.Namespace):
+    from wifisense.config import load_config
+    return load_config(args.config)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -150,6 +191,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.replay_speed is not None:
         cfg.set_path("replay.speed", args.replay_speed)
+    if args.router_host:
+        cfg.set_path("router.host", args.router_host)
+    if args.router_user:
+        cfg.set_path("router.user", args.router_user)
+    if args.router_pass:
+        cfg.set_path("router.password", args.router_pass)
+    if args.router_protocol:
+        cfg.set_path("router.protocol", args.router_protocol)
+        cfg.set_path("router.port", 23 if args.router_protocol == "telnet" else 22)
+    if args.router_iface:
+        cfg.set_path("router.iface", args.router_iface)
     if args.print_config and not args.capabilities:
         print(dump_config(cfg))
         return 0
@@ -159,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.capabilities:
         return cmd_capabilities(args, cfg)
+
+    if args.discover:
+        return cmd_discover(args)
 
     from wifisense.runner import SensingRunner
 
@@ -178,9 +233,13 @@ def main(argv: list[str] | None = None) -> int:
         retry_forever=not args.no_retry,
         calibrate=args.calibrate or args.calibrate_only,
         calibrate_only=args.calibrate_only,
+        calibrate_zones=args.calibrate_zones,
+        zone_duration=args.zone_duration,
+        zone_names=args.zone_names,
         arm=args.arm,
         duration=args.duration,
         points=args.points or 900,
+        quiet=args.quiet,
     )
 
     try:
