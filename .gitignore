@@ -1,0 +1,13 @@
+# WiFi Human Sensing
+.venv/
+__pycache__/
+*.pyc
+data/*
+!data/.gitkeep
+models/*
+!models/.gitkeep
+*.npz
+.pytest_cache/
+build/
+dist/
+*.egg-info/

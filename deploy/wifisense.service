@@ -1,0 +1,26 @@
+[Unit]
+Description=WiFi Human Presence Sensing (deteksi maling via RSSI/CSI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/wifi-human-sensing
+ExecStart=/opt/wifi-human-sensing/.venv/bin/python main.py --no-console --arm away
+Restart=always
+RestartSec=5
+# watchdog: kalau proses hang > 60s, systemd kill & restart
+WatchdogSec=0
+TimeoutStopSec=20
+# --- Telegram token (opsional, untuk notifikasi alarm) ---
+# Environment=WIFISENSE_TELEGRAM_TOKEN=123456:ABC...
+# Environment=WIFISENSE_TELEGRAM_CHAT=123456789
+# --- tuning opsional ---
+# Environment=WIFISENSE_EXTRA="--source radiotap --interface wlan0 --presence-k 3.5"
+# ExecStart=/opt/wifi-human-sensing/.venv/bin/python main.py --no-console --arm away $WIFISENSE_EXTRA
+KillSignal=SIGINT
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

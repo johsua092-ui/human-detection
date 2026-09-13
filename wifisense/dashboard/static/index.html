@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>WiFi Sense</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121821; --panel-2:#18202b; --line:#233043;
+    --txt:#e6edf5; --dim:#8fa0b5; --accent:#4da3ff;
+    --ok:#39d98a; --warn:#ffc857; --alarm:#ff5566; --idle:#5d6b7f;
+    --radius:14px; --pad:14px;
+    --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}
+  body{padding:calc(var(--safe-t) + 10px) 12px calc(var(--safe-b) + 24px)}
+  header{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  h1{font-size:1.05rem;margin:0;letter-spacing:.02em;font-weight:650}
+  h1 small{display:block;color:var(--dim);font-weight:400;font-size:.72rem;letter-spacing:.04em}
+  .spacer{flex:1 1 auto}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;
+    background:var(--panel-2);border:1px solid var(--line);font-size:.72rem;color:var(--dim);
+    white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
+  .dot.live{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.poll{background:var(--warn)}
+  .dot.off{background:var(--alarm)}
+  main{display:grid;gap:12px;max-width:1200px;margin:0 auto}
+  @media(min-width:760px){ main{grid-template-columns:1.15fr .85fr;align-items:start} }
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:var(--pad);overflow:hidden}
+  .card h2{font-size:.74rem;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+    margin:0 0 10px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .card h2 svg{width:14px;height:14px;flex:0 0 auto;stroke:currentColor;fill:none;stroke-width:2}
+
+  /* status block */
+  .status{border-radius:12px;padding:13px 14px;background:var(--panel-2);
+    border:1px solid var(--line);transition:background .25s,border-color .25s}
+  .status .label{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .status .value{font-size:1.75rem;font-weight:700;line-height:1.15;margin-top:2px;
+    letter-spacing:.01em}
+  .status.human{background:rgba(255,85,102,.13);border-color:rgba(255,85,102,.45)}
+  .status.human .value{color:var(--alarm)}
+  .status.clear .value{color:var(--ok)}
+  .status.unknown .value{color:var(--dim)}
+  .status .sub{color:var(--dim);font-size:.78rem;margin-top:4px}
+  .status.motion{box-shadow:inset 3px 0 0 var(--warn)}
+  .row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
+  .row:last-child{border-bottom:0}
+  .row .k{color:var(--dim);font-size:.8rem}
+  .row .v{font-variant-numeric:tabular-nums;font-weight:600;font-size:.95rem}
+  .val-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .bar{height:9px;border-radius:6px;background:var(--panel-2);overflow:hidden;
+    border:1px solid var(--line);margin-top:6px}
+  .bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--ok),var(--warn),var(--alarm));
+    transition:width .3s}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .metric{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+  .metric .k{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}
+  .metric .v{font-size:1.02rem;font-weight:650;font-variant-numeric:tabular-nums;margin-top:2px}
+
+  /* chart */
+  .chartwrap{position:relative;width:100%;height:190px;touch-action:pan-y}
+  @media(min-width:760px){ .chartwrap{height:240px} }
+  canvas{width:100%;height:100%;display:block;border-radius:10px;background:#0d131b}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--dim);font-size:.72rem;margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .swatch{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .chart-hint{color:var(--dim);font-size:.7rem;margin-top:6px}
+
+  /* actions */
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+  button{appearance:none;border:1px solid var(--line);background:var(--panel-2);color:var(--txt);
+    border-radius:11px;padding:12px 10px;font-size:.85rem;font-weight:600;min-height:46px;
+    cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+  button svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+  button:active{transform:translateY(1px)}
+  button.primary{border-color:rgba(77,163,255,.5);background:rgba(77,163,255,.13)}
+  button.alarm{border-color:rgba(255,85,102,.5);background:rgba(255,85,102,.14)}
+  button.ok{border-color:rgba(57,217,138,.45);background:rgba(57,217,138,.12)}
+  button[disabled]{opacity:.45}
+  .wide{grid-column:1 / -1}
+
+  /* lists */
+  .list{list-style:none;margin:0;padding:0;max-height:280px;overflow:auto}
+  .list li{display:flex;gap:9px;padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.06);
+    font-size:.82rem;align-items:flex-start}
+  .list li:last-child{border-bottom:0}
+  .list .when{color:var(--dim);font-variant-numeric:tabular-nums;flex:0 0 62px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:6px;font-size:.66rem;font-weight:700;
+    letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--line);color:var(--dim)}
+  .tag.alarm{color:var(--alarm);border-color:rgba(255,85,102,.5)}
+  .tag.notice{color:var(--warn);border-color:rgba(255,200,87,.5)}
+  .tag.info{color:var(--accent);border-color:rgba(77,163,255,.45)}
+
+  .banner{display:none;border-radius:11px;padding:10px 12px;font-size:.8rem;
+    border:1px solid rgba(255,200,87,.5);background:rgba(255,200,87,.1);color:#ffe3a3;margin-bottom:10px}
+  .banner.show{display:block}
+  .banner.demo{border-color:rgba(255,85,102,.55);background:rgba(255,85,102,.14);color:#ffc9cf}
+  footer{color:var(--dim);font-size:.7rem;margin-top:14px;text-align:center;line-height:1.6}
+  a{color:var(--accent);text-decoration:none}
+  .overlay{position:fixed;inset:0;background:rgba(6,9,13,.94);display:none;
+    align-items:center;justify-content:center;padding:22px;z-index:50}
+  .overlay.show{display:flex}
+  .overlay form{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px;width:100%;max-width:340px}
+  .overlay h3{margin:0 0 6px;font-size:1rem}
+  .overlay p{color:var(--dim);font-size:.8rem;margin:0 0 14px}
+  input[type=password],input[type=text]{width:100%;padding:13px;border-radius:10px;
+    border:1px solid var(--line);background:#0d131b;color:var(--txt);font-size:1rem;
+    letter-spacing:.12em;text-align:center}
+  .muted{color:var(--dim)}
+  .kv{display:flex;justify-content:space-between;gap:8px;font-size:.76rem;color:var(--dim);
+    padding:3px 0}
+  .kv b{color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header>
+  <h1>WiFi Sense<small id="subtitle">human presence &amp; motion, from radio</small></h1>
+  <span class="spacer"></span>
+  <span class="pill" id="conn"><span class="dot off" id="connDot"></span><span id="connTxt">connecting</span></span>
+  <span class="pill" id="rolePill" style="display:none">role: <b id="roleTxt">view</b></span>
+</header>
+
+<div class="banner" id="warnBanner"></div>
+<div class="banner demo" id="demoBanner">SYNTHETIC / REPLAY DATA — this is not a live radio measurement.</div>
+
+<main>
+  <section class="card">
+    <h2>
+      <svg viewBox="0 0 24 24"><path d="M12 3v9"/><circle cx="12" cy="17" r="4"/></svg>
+      live detection
+    </h2>
+    <div class="status unknown" id="statusBox">
+      <div class="label">presence</div>
+      <div class="value" id="presenceV">waiting for data</div>
+      <div class="sub" id="presenceSub">warming up the analysis window</div>
+      <div class="bar"><i id="confBar"></i></div>
+    </div>
+
+    <div class="row"><span class="k">motion</span><span class="v" id="motionV">--</span></div>
+    <div class="row"><span class="k">confidence</span><span class="v val-mono" id="confV">--</span></div>
+    <div class="row"><span class="k">reason</span><span class="v muted" id="reasonV" style="font-weight:400;text-align:right;font-size:.78rem">--</span></div>
+
+    <div class="chartwrap" style="margin-top:12px">
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="legend">
+      <span><i class="swatch" style="background:#4da3ff"></i>RSSI (dBm)</span>
+      <span><i class="swatch" style="background:#8fa0b5"></i>baseline</span>
+      <span><i class="swatch" style="background:rgba(255,85,102,.5)"></i>human present</span>
+      <span><i class="swatch" style="background:rgba(255,200,87,.6)"></i>motion</span>
+    </div>
+    <div class="chart-hint" id="chartHint">drag to inspect is not needed — the window scrolls automatically</div>
+
+    <div class="grid2" style="margin-top:12px">
+      <div class="metric"><div class="k">signal</div><div class="v" id="rssiV">-- dBm</div></div>
+      <div class="metric"><div class="k">variance</div><div class="v" id="varV">--</div></div>
+      <div class="metric"><div class="k">motion energy</div><div class="v" id="energyV">--</div></div>
+      <div class="metric"><div class="k">presence score</div><div class="v" id="pScoreV">--</div></div>
+    </div>
+  </section>
+
+  <div style="display:grid;gap:12px">
+    <section class="card">
+      <h2>
+        <svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 9v4"/><path d="M12 16h.01"/></svg>
+        alarm
+      </h2>
+      <div class="row"><span class="k">state</span><span class="v" id="alarmV">disarmed</span></div>
+      <div class="row"><span class="k">triggers</span><span class="v val-mono" id="trigV">0</span></div>
+      <div class="row"><span class="k">notifications</span><span class="v muted" id="notifV" style="font-weight:400">none configured</span></div>
+      <div class="actions">
+        <button id="armAway" class="alarm">
+          <svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>arm away</button>
+        <button id="armHome">
+          <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>arm home</button>
+        <button id="disarm" class="ok wide">
+          <svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0"/></svg>disarm</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>
+        <svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M6 15l4-5 4 3 4-6"/></svg>
+        calibration &amp; session
+      </h2>
+      <div class="row"><span class="k">baseline</span><span class="v" id="baseV">not calibrated</span></div>
+      <div class="row"><span class="k">window / rate</span><span class="v val-mono" id="rateV">--</span></div>
+      <div class="row"><span class="k">samples</span><span class="v val-mono" id="sampV">0</span></div>
+      <div class="actions">
+        <button id="calibBtn" class="primary wide">
+          <svg viewBox="0 0 24 24"><path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/><circle cx="12" cy="12" r="4"/></svg>calibrate empty room</button>
+        <button id="recalibBtn" class="wide">re-calibrate (drifted)</button>
+      </div>
+      <div class="kv" style="margin-top:10px"><span>mode</span><b id="modeV">--</b></div>
+      <div class="kv"><span>source</span><b id="sourceV">--</b></div>
+      <div class="kv"><span>interface</span><b id="ifaceV">--</b></div>
+      <div class="kv"><span>uptime</span><b id="upV">--</b></div>
+      <div class="kv"><span>windows logged</span><b id="winV">0</b></div>
+    </section>
+
+    <section class="card">
+      <h2>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        event timeline
+      </h2>
+      <ul class="list" id="events"><li class="muted">no events yet</li></ul>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div id="footNote">WiFi RSSI/CSI presence sensing — no camera, no microphone, no identity, no location.</div>
+  <div><a href="/api/docs">API</a> · <a href="/api/health">health</a> · <a href="/api/snapshot">snapshot</a> · <a href="/api/windows.csv">windows.csv</a></div>
+  <div class="muted" id="latencyV">--</div>
+</footer>
+
+<div class="overlay" id="pinOverlay">
+  <form id="pinForm">
+    <h3>PIN required</h3>
+    <p>This dashboard is protected. Enter the view PIN (family) or the admin PIN (owner).</p>
+    <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" placeholder="PIN">
+    <div class="actions" style="margin-top:12px">
+      <button type="submit" class="primary wide">unlock</button>
+    </div>
+    <p class="muted" id="pinErr" style="margin-top:10px;display:none">wrong PIN</p>
+  </form>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var MAX_POINTS = 2400;           // ~2 min at 20 Hz, ~40 min at 1 Hz
+  var state = {
+    points: [], role: "admin", authEnabled: false, ws: null, mode: "connecting",
+    tickCount: 0, lastTs: 0, pollTimer: null, wsFailures: 0, lastRender: 0
+  };
+
+  var el = function(id){ return document.getElementById(id); };
+  var fmt = function(v, d){ return (v === null || v === undefined || isNaN(v)) ? "--" : Number(v).toFixed(d === undefined ? 2 : d); };
+  var fmtClock = function(t){
+    var d = new Date(t * 1000);
+    return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2);
+  };
+  var fmtDur = function(s){
+    s = Math.max(0, Math.floor(s||0));
+    var h = Math.floor(s/3600), m = Math.floor((s%3600)/60), x = s%60;
+    return h ? h+"h "+m+"m" : (m ? m+"m "+x+"s" : x+"s");
+  };
+
+  /* ---------- connection ---------- */
+  function setConn(kind, text){
+    el("connDot").className = "dot " + kind;
+    el("connTxt").textContent = text;
+  }
+  function setRole(role, enabled){
+    state.role = role; state.authEnabled = !!enabled;
+    var pill = el("rolePill");
+    if (role === "admin" || role === "view") {
+      pill.style.display = "";
+      el("roleTxt").textContent = role + (enabled ? "" : " (lan open)");
+    } else {
+      pill.style.display = "none";
+    }
+    var admin = (role === "admin");
+    ["calibBtn","recalibBtn","armAway","armHome","disarm"].forEach(function(id){
+      el(id).disabled = !admin;
+    });
+  }
+
+  /* ---------- data ---------- */
+  function mergePoints(incoming){
+    if (!incoming || !incoming.length) return;
+    var last = state.points.length ? state.points[state.points.length-1].i : 0;
+    for (var k=0;k<incoming.length;k++){
+      var p = incoming[k];
+      if (p.i > last) { state.points.push(p); last = p.i; }
+    }
+    if (state.points.length > MAX_POINTS) state.points.splice(0, state.points.length - MAX_POINTS);
+  }
+
+  function applySnapshot(snap){
+    if (!snap) return;
+    if (snap.history) { state.points = []; mergePoints(snap.history); }
+    if (snap.role !== undefined) setRole(snap.role, snap.auth_enabled);
+    applyDynamic(snap);
+    if (state.authEnabled && (snap.role === "none")) showPin();
+  }
+
+  function applyDynamic(snap){
+    var latest = snap.latest || {};
+    var meta = snap.meta || {};
+    var stats = snap.stats || {};
+    var alarm = snap.alarm || {};
+    var cal = snap.calibration || {};
+
+    var presence = latest.presence;
+    var motion = latest.motion;
+    var conf = latest.confidence;
+    var box = el("statusBox");
+    var value = el("presenceV");
+
+    if (presence === undefined || presence === null){
+      box.className = "status unknown";
+      value.textContent = "waiting for data";
+      el("presenceSub").textContent = meta.warming_up ? "warming up the analysis window" : "no decision yet";
+    } else if (presence){
+      box.className = "status human" + (motion ? " motion" : "");
+      value.textContent = "HUMAN DETECTED";
+      el("presenceSub").textContent = latest.holding ? "held (decaying after last event)" : latest.reason || "";
+    } else {
+      box.className = "status clear" + (motion ? " motion" : "");
+      value.textContent = "NO HUMAN";
+      el("presenceSub").textContent = latest.reason || "";
+    }
+    if (conf !== undefined && conf !== null){
+      el("confBar").style.width = Math.max(2, Math.min(100, conf)) + "%";
+      el("confV").textContent = fmt(conf, 0) + "%";
+    }
+    el("motionV").textContent = latest.motion_label || (motion ? "DETECTED" : "NONE");
+    el("reasonV").textContent = latest.reason || "--";
+
+    var f = latest.features || {};
+    el("varV").textContent = fmt(f.var, 3);
+    el("energyV").textContent = fmt(f.motion_energy, 3);
+    el("pScoreV").textContent = fmt(latest.presence_ratio, 2) + "x thr";
+    el("pScoreV").textContent = fmt(latest.presence_score, 2);
+
+    var last = state.points.length ? state.points[state.points.length-1] : null;
+    el("rssiV").textContent = (last && last.rssi !== null && last.rssi !== undefined ? fmt(last.rssi,1) : "--") + " dBm";
+    el("baseV").textContent = (meta.baseline_median !== undefined && meta.baseline_median !== null)
+      ? fmt(meta.baseline_median,1) + " dBm" : "not calibrated";
+    el("rateV").textContent = fmt(stats.rate_hz, 1) + " Hz / " + fmt(stats.window_s, 0) + " s";
+    el("sampV").textContent = stats.samples || 0;
+    el("upV").textContent = fmtDur(snap.uptime_s !== undefined ? snap.uptime_s : stats.uptime_s);
+    el("winV").textContent = stats.windows || 0;
+    el("modeV").textContent = meta.mode || "--";
+    el("sourceV").textContent = meta.source || "--";
+    el("ifaceV").textContent = meta.interface || "auto";
+    el("latencyV").textContent = last && last.t ? ("last sample " + fmtClock(last.t)) : "--";
+
+    var alarmState = (alarm.state || "DISARMED").toString();
+    el("alarmV").textContent = alarmState.toLowerCase().replace("_"," ");
+    el("trigV").textContent = alarm.trigger_count || 0;
+    var notifiers = (alarm.notifiers && alarm.notifiers.notifiers) ? alarm.notifiers.notifiers : [];
+    var configured = notifiers.filter(function(n){ return n.configured; }).map(function(n){ return n.notifier; });
+    el("notifV").textContent = configured.length ? configured.join(", ") : "none configured";
+
+    if (cal.state){
+      el("calibBtn").textContent = cal.state === "running"
+        ? ("calibrating " + fmt((cal.progress||0)*100,0) + "%") : el("calibBtn").textContent;
+    }
+
+    var banner = el("warnBanner");
+    var warnings = snap.warnings || [];
+    if (meta.notes && meta.notes.length) warnings = warnings.concat(meta.notes.slice(0,2));
+    if (warnings.length){
+      banner.className = "banner show";
+      banner.textContent = warnings.slice(0,3).join("  |  ");
+    } else { banner.className = "banner"; }
+
+    el("demoBanner").className = "banner demo" + (meta.synthetic || meta.demo || meta.source === "synthetic" || meta.source === "replay" ? " show" : "");
+
+    renderEvents(snap.events || []);
+    el("footNote").textContent = "mode " + (meta.mode||"?") + " · source " + (meta.source||"?")
+      + " · " + (meta.interface ? ("iface " + meta.interface) : "iface auto");
+  }
+
+  function renderEvents(events){
+    var list = el("events");
+    var recent = events.filter(function(e){ return e && (e.kind || e.severity); }).slice(-25).reverse();
+    if (!recent.length){ list.innerHTML = '<li class="muted">no events yet</li>'; return; }
+    var html = "";
+    for (var i=0;i<recent.length;i++){
+      var e = recent[i];
+      var sev = (e.severity || "info");
+      var msg = (e.message || e.type || "").toString();
+      html += '<li><span class="when">' + fmtClock(e.t || 0) + '</span><span>'
+           + '<span class="tag ' + sev + '">' + (e.kind || sev) + '</span> '
+           + escapeHtml(msg) + '</span></li>';
+    }
+    list.innerHTML = html;
+  }
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
+    });
+  }
+
+  /* ---------- chart ---------- */
+  var canvas = el("chart"), ctx = canvas.getContext("2d"), dpr = 1;
+  function resize(){
+    dpr = window.devicePixelRatio || 1;
+    var r = canvas.getBoundingClientRect();
+    canvas.width = Math.max(200, Math.floor(r.width * dpr));
+    canvas.height = Math.max(120, Math.floor(r.height * dpr));
+    draw(true);
+  }
+  window.addEventListener("resize", resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas.parentElement);
+
+  function draw(force){
+    var now = performance.now();
+    if (!force && now - state.lastRender < 90) return;
+    state.lastRender = now;
+    var W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
+    var pts = state.points;
+    if (!pts.length){
+      ctx.fillStyle = "#8fa0b5"; ctx.font = (13*dpr)+"px sans-serif";
+      ctx.fillText("waiting for samples…", 14*dpr, 28*dpr);
+      return;
+    }
+    var padL = 44*dpr, padR = 10*dpr, padT = 12*dpr, padB = 20*dpr;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+
+    var vals = [], tMin = Infinity, tMax = -Infinity, i;
+    for (i=0;i<pts.length;i++){
+      var p = pts[i];
+      if (p.t > tMax) tMax = p.t;
+      if (p.t < tMin) tMin = p.t;
+      if (p.rssi !== null && p.rssi !== undefined && !isNaN(p.rssi)) vals.push(p.rssi);
+    }
+    if (!vals.length || !isFinite(tMin) || tMax <= tMin) return;
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    var mid = (lo+hi)/2; var span = Math.max(3, (hi-lo)*1.6);
+    lo = mid - span/2; hi = mid + span/2;
+
+    var base = state.baselineMedian;
+    var X = function(t){ return padL + (t - tMin) / (tMax - tMin) * plotW; };
+    var Y = function(v){ return padT + (1 - (v - lo) / (hi - lo)) * plotH; };
+
+    // presence / motion shading from the point stream
+    var bandTop = padT, bandH = 4*dpr;
+    var prev = null;
+    for (i=0;i<pts.length;i++){
+      var q = pts[i];
+      if (q.presence || q.motion){
+        var x0 = X(q.t), x1 = X(pts[Math.min(i+1, pts.length-1)].t);
+        ctx.fillStyle = q.motion ? "rgba(255,200,87,.85)" : "rgba(255,85,102,.55)";
+        ctx.fillRect(x0, bandTop, Math.max(1, x1-x0), bandH);
+      }
+      prev = q;
+    }
+
+    // grid
+    ctx.strokeStyle = "rgba(255,255,255,.07)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (i=0;i<=3;i++){
+      var y = padT + plotH*i/3;
+      ctx.moveTo(padL, y); ctx.lineTo(padL+plotW, y);
+      ctx.fillStyle = "#8fa0b5"; ctx.font = (10*dpr)+"px sans-serif";
+      var label = (hi - (hi-lo)*i/3).toFixed(1);
+      ctx.fillText(label, 4*dpr, y + 3*dpr);
+    }
+    ctx.stroke();
+
+    // baseline
+    if (base !== undefined && base !== null && base > lo && base < hi){
+      ctx.strokeStyle = "rgba(143,160,181,.6)"; ctx.setLineDash([5*dpr, 5*dpr]);
+      ctx.beginPath(); ctx.moveTo(padL, Y(base)); ctx.lineTo(padL+plotW, Y(base)); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // rssi line + presence-weighted fill
+    ctx.lineWidth = Math.max(1.4*dpr, 1);
+    var started = false;
+    ctx.strokeStyle = "#4da3ff";
+    ctx.beginPath();
+    for (i=0;i<pts.length;i++){
+      var r = pts[i];
+      if (r.rssi === null || r.rssi === undefined || isNaN(r.rssi)) continue;
+      var px = X(r.t), py = Y(r.rssi);
+      if (!started){ ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+    }
+    ctx.stroke();
+
+    // latest value marker
+    for (i=pts.length-1;i>=0;i--){
+      var lastP = pts[i];
+      if (lastP.rssi !== null && lastP.rssi !== undefined && !isNaN(lastP.rssi)){
+        ctx.fillStyle = "#e6edf5";
+        ctx.beginPath(); ctx.arc(X(lastP.t), Y(lastP.rssi), 3*dpr, 0, Math.PI*2); ctx.fill();
+        break;
+      }
+    }
+    // time labels
+    ctx.fillStyle = "#8fa0b5"; ctx.font = (10*dpr)+"px sans-serif";
+    ctx.fillText(fmtClock(tMin), padL, H - 5*dpr);
+    var txt = fmtClock(tMax);
+    ctx.fillText(txt, padL + plotW - ctx.measureText(txt).width, H - 5*dpr);
+  }
+
+  /* ---------- transport ---------- */
+  function startPolling(){
+    if (state.pollTimer) return;
+    state.mode = "polling";
+    setConn("poll", "polling 1s");
+    var since = 0;
+    var tick = function(){
+      fetch("/api/state", {credentials:"same-origin"}).then(function(r){ return r.json(); }).then(function(s){
+        applyDynamic({latest:s.latest, meta:s.meta, stats:s.stats, alarm:s.alarm,
+                      calibration:s.calibration, warnings:s.warnings, events:s.events || []});
+      }).catch(function(){ setConn("off","offline"); });
+      fetch("/api/history?since=" + since + "&limit=600", {credentials:"same-origin"})
+        .then(function(r){ return r.json(); }).then(function(d){
+          if (d && d.points){ mergePoints(d.points); since = d.last_index || since; }
+          draw(true);
+        }).catch(function(){});
+    };
+    tick();
+    state.pollTimer = setInterval(tick, 1000);
+  }
+
+  function stopPolling(){
+    if (state.pollTimer){ clearInterval(state.pollTimer); state.pollTimer = null; }
+  }
+
+  function connect(){
+    try { state.ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?points=400"); }
+    catch(e){ startPolling(); return; }
+
+    state.ws.onopen = function(){
+      state.wsFailures = 0; stopPolling();
+      state.mode = "live"; setConn("live", "live");
+    };
+    state.ws.onmessage = function(ev){
+      var msg; try { msg = JSON.parse(ev.data); } catch(e){ return; }
+      if (msg.type === "snapshot"){ applySnapshot(msg); draw(true); }
+      else if (msg.type === "tick"){
+        state.tickCount++;
+        mergePoints(msg.points || []);
+        applyDynamic(msg);
+        draw(false);
+      } else if (msg.type === "error"){ startPolling(); }
+    };
+    state.ws.onclose = function(){
+      state.wsFailures++;
+      state.ws = null;
+      if (state.wsFailures >= 2){ startPolling(); }
+      setConn("off","reconnecting");
+      setTimeout(connect, Math.min(15000, 1000 * state.wsFailures));
+    };
+    state.ws.onerror = function(){ setConn("off","socket error"); };
+  }
+
+  /* ---------- actions ---------- */
+  function post(path){
+    return fetch(path, {method:"POST", credentials:"same-origin"})
+      .then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
+      .catch(function(){ el("warnBanner").className = "banner show";
+        el("warnBanner").textContent = "action rejected (PIN / role required, or server busy)"; });
+  }
+  el("calibBtn").addEventListener("click", function(){ post("/api/calibrate"); });
+  el("recalibBtn").addEventListener("click", function(){ post("/api/calibrate?recalibrate=true"); });
+  el("armAway").addEventListener("click", function(){ post("/api/arm?mode=away"); });
+  el("armHome").addEventListener("click", function(){ post("/api/arm?mode=home"); });
+  el("disarm").addEventListener("click", function(){ post("/api/disarm"); });
+
+  /* ---------- pin gate ---------- */
+  function showPin(){ el("pinOverlay").className = "overlay show"; }
+  el("pinForm").addEventListener("submit", function(ev){
+    ev.preventDefault();
+    var pin = el("pinInput").value.trim();
+    fetch("/api/whoami?pin=" + encodeURIComponent(pin), {credentials:"same-origin"})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.role === "none"){ el("pinErr").style.display = ""; return; }
+        document.cookie = "wifisense_pin=" + encodeURIComponent(pin) + ";path=/;max-age=" + (60*60*24*30) + ";samesite=lax";
+        el("pinOverlay").className = "overlay";
+        if (state.ws) { try { state.ws.close(); } catch(e){} }
+        boot();
+      })
+      .catch(function(){ el("pinErr").style.display = ""; });
+  });
+
+  /* ---------- boot ---------- */
+  function boot(){
+    fetch("/api/snapshot?points=400", {credentials:"same-origin"})
+      .then(function(r){ return r.json(); })
+      .then(function(snap){
+        applySnapshot(snap);
+        resize(); draw(true);
+        if (state.authEnabled && snap.role === "none") showPin();
+      })
+      .catch(function(){ setConn("off","offline"); });
+    connect();
+  }
+  resize();
+  boot();
+})();
+</script>
+</body>
+</html>

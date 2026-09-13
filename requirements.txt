@@ -1,0 +1,29 @@
+# WiFi Human Presence Sensing — core runtime dependencies
+# Python >= 3.9 (tested on 3.11)
+
+# Signal maths + data handling
+numpy>=1.23
+scipy>=1.9
+pandas>=1.5
+
+# Detection engine (classifier mode). The heuristic/adaptive engine works without this.
+scikit-learn>=1.2
+
+# Dashboard backend (HTTP + WebSocket)
+fastapi>=0.104
+uvicorn>=0.24
+websockets>=11.0
+
+# Config + model persistence
+PyYAML>=6.0
+joblib>=1.2
+
+# --- development / test only ---
+pytest>=7.4
+httpx>=0.25          # required by fastapi.testclient
+
+# --- optional, install manually if you want them ---
+# qrcode             -> prints a QR code in the terminal so a phone can open the dashboard
+# csiread            -> parse offline CSI pcaps (nexmon / iwl5300 / ath9k CSI tools)
+# psutil             -> richer interface stats
+# matplotlib, plotly -> offline plots instead of / in addition to the web dashboard

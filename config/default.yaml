@@ -1,0 +1,128 @@
+# ============================================================================
+# wifi-human-sensing / default configuration
+# Every key can be overridden by CLI flags or a YAML overlay (--config).
+# See README.md for the full guide.
+# ============================================================================
+
+# --- radio ---------------------------------------------------------------
+interface: null        # e.g. "wlan0". null = auto-detect first wireless NIC.
+mode: auto             # auto | rssi | csi
+source: auto           # auto | radiotap | iw | proc | netsh | airport | termux
+                       #       | csi | csi_pcap | synthetic | replay
+channel: null          # monitor-mode channel to lock, e.g. 6 (null = stay put)
+
+# --- acquisition ---------------------------------------------------------
+sampling:
+  interval_s: 0.05     # poll interval for polling backends (iw / proc / netsh / termux)
+  window_s: 12.0       # rolling analysis window length (seconds)
+  min_samples: 24      # samples needed in window before emitting a decision
+  resample_hz: 20.0    # uniform grid the irregular RSSI stream is resampled onto
+
+# --- preprocessing -------------------------------------------------------
+processing:
+  outlier_gate_sigma: 4.0   # reject samples further than k*MAD from the running median
+  median_window: 5          # short median filter (kills single-sample dropouts)
+  hampel_window: 9          # Hampel filter window for the analysis buffer
+  hampel_sigma: 3.0
+  detrend: true             # remove slow drift (thermal / AGC / channel change)
+  smooth_alpha: 0.35        # EMA on the displayed RSSI
+
+# --- features ------------------------------------------------------------
+features:
+  spectral: true            # Welch PSD + band powers (needs scipy)
+  nperseg: 128
+  bands:                    # name: [low_hz, high_hz]
+    slow: [0.05, 0.30]      # slow body drift, breathing-scale envelope
+    motion: [0.30, 2.00]    # walking / gesturing
+    fast: [2.00, 8.00]      # fidgeting, limb motion, noise floor
+
+# --- detection -----------------------------------------------------------
+detection:
+  method: adaptive      # adaptive | zscore | ml
+  presence_k: 3.0       # robust-z above baseline used for the presence decision
+  motion_k: 2.2         # robust-z of short-term energy used for the motion decision
+  hysteresis_up: 2      # consecutive windows above threshold to assert presence
+  hysteresis_down: 5    # consecutive windows below threshold to release presence
+  hold_s: 6.0           # keep "human present" alive this long after the last hit
+  min_confidence: 35    # confidence (%) floor for reporting a detection
+  ml_model: null        # path to a joblib model for method=ml (e.g. models/rf.joblib)
+
+# --- CSI -----------------------------------------------------------------
+csi:
+  window_s: 4.0         # CSI analysis window (frames arrive at packet rate)
+  min_frames: 12
+  chanspec: "36/80"     # nexmon_csi chanspec (channel/bw) — must match your chip
+  core: 1               # which rx core to sample
+  nexutil_size: 500
+  udp_port: 5500        # nexmon firmware streams CSI to this UDP port
+
+# --- calibration ---------------------------------------------------------
+calibration:
+  duration_s: 30.0      # empty-room baseline capture length
+  settle_s: 3.0         # discard the first seconds (AGC / radio settling)
+  percentile: 99.0      # unused fallback; robust z-thresholds are the primary path
+  adaptive_drift: 0.02  # EMA rate for slow baseline re-adaptation while EMPTY
+  dir: models           # where baseline_*.json files are saved
+
+# --- intrusion alarm ("deteksi maling") ----------------------------------
+alarm:
+  enabled: true
+  trigger_on: presence  # presence (any perturbation) | motion (movement only)
+  min_confidence: 70    # % needed before a trigger is accepted
+  sustain_s: 1.5        # how long the condition must hold before triggering
+  cooldown_s: 120       # re-alert cooldown while still active
+  clear_s: 25           # after trigger, how long empty before a "room clear" event
+  arm_delay_s: 30       # exit delay between arming and actually armed
+  notify_clear: false   # send a "room clear" notification too
+  start_armed: false    # arm on startup (e.g. leave the machine running as a sentry)
+  notify:
+    min_severity: info
+    console: true
+    webhook_url: null   # e.g. https://ntfy.sh/your-topic
+    webhook_headers: {}
+    telegram:
+      enabled: true     # uses config below, or WIFISENSE_TELEGRAM_TOKEN/CHAT env,
+      bot_token: null   # or this machine's Synapse TELEGRAM_BOT_TOKEN (see README)
+      chat_id: null
+
+# --- logging -------------------------------------------------------------
+logging:
+  enabled: true
+  dir: data
+  format: csv           # csv | jsonl
+  flush_every: 1        # rows per flush
+  events: true          # separate events.csv timeline
+
+# --- dashboard -----------------------------------------------------------
+dashboard:
+  enabled: true
+  host: 0.0.0.0         # 0.0.0.0 so every phone/laptop on the LAN can open it
+  port: 8000
+  history_points: 900   # points kept for the live graph (~45 s at 20 Hz)
+  push_hz: 5.0          # websocket push rate (incremental per client)
+  open_browser: false
+  show_qr: true         # print a QR code for phone access if `qrcode` is installed
+  auth:
+    enabled: false      # true = require a PIN (view = family watch, admin = control)
+    view_pin: null      # family: watch-only access
+    admin_pin: null     # owner: calibrate + arm/disarm + full control
+
+# --- console -------------------------------------------------------------
+console:
+  color: true
+  refresh_hz: 2.0
+  show_features: true    # extra feature lines under the main block
+
+# --- resilience ----------------------------------------------------------
+watchdog:
+  stall_s: 45.0          # no samples for this long -> restart the backend
+
+# --- replay --------------------------------------------------------------
+replay:
+  speed: 1.0             # 1.0 = real time, 0 = as fast as possible
+
+# --- synthetic (DEMO ONLY — explicitly requested, never auto-selected) ----
+synthetic:
+  scenario: cycle        # cycle (empty->presence->motion) | empty | presence | motion
+  seed: 1337
+  rate_hz: 20.0
